@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voxel Eiffel Tower</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0b1022;
+      font-family: Arial, sans-serif;
+    }
+    canvas { display: block; }
+    .hud {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      color: rgba(255,255,255,0.9);
+      background: rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 10px 12px;
+      border-radius: 10px;
+      backdrop-filter: blur(4px);
+      user-select: none;
+      pointer-events: none;
+    }
+    .hud h1 {
+      margin: 0 0 4px 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    .hud p {
+      margin: 0;
+      font-size: 12px;
+      opacity: 0.85;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <h1>VOXEL EIFFEL TOWER</h1>
+    <p>Drag to orbit • Scroll to zoom</p>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script>
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0c1330);
+    scene.fog = new THREE.Fog(0x0c1330, 120, 320);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(110, 78, 120);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.35;
+    controls.minDistance = 45;
+    controls.maxDistance = 240;
+    controls.target.set(0, 42, 0);
+
+    const ambient = new THREE.AmbientLight(0x8090c8, 0.9);
+    scene.add(ambient);
+
+    const moonLight = new THREE.DirectionalLight(0xdde8ff, 0.9);
+    moonLight.position.set(70, 120, 60);
+    scene.add(moonLight);
+
+    const warmFill = new THREE.DirectionalLight(0xffc078, 0.55);
+    warmFill.position.set(-60, 45, -30);
+    scene.add(warmFill);
+
+    const world = new THREE.Group();
+    scene.add(world);
+
+    const voxelSize = 1.5;
+    const voxelMap = new Map();
+    const lampPositions = [];
+
+    const priority = {
+      grass: 0,
+      path: 1,
+      ironDark: 2,
+      iron: 3,
+      ironLight: 4,
+      glow: 5
+    };
+
+    function key(x, y, z) {
+      return x + "," + y + "," + z;
+    }
+
+    function ironTone(x, y, z) {
+      const n = Math.abs(x * 17 + y * 31 + z * 13) % 10;
+      if (n < 2) return "ironDark";
+      if (n < 8) return "iron";
+      return "ironLight";
+    }
+
+    function addVoxel(x, y, z, color = "iron") {
+      const finalColor = color === "iron" ? ironTone(x, y, z) : color;
+      const k = key(x, y, z);
+      const existing = voxelMap.get(k);
+      if (!existing || priority[finalColor] >= priority[existing]) {
+        voxelMap.set(k, finalColor);
+      }
+    }
+
+    function line(x1, y1, z1, x2, y2, z2, color = "iron") {
+      const steps = Math.max(
+        Math.abs(x2 - x1),
+        Math.abs(y2 - y1),
+        Math.abs(z2 - z1)
+      );
+      if (steps === 0) {
+        addVoxel(x1, y1, z1, color);
+        return;
+      }
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const x = Math.round(x1 + (x2 - x1) * t);
+        const y = Math.round(y1 + (y2 - y1) * t);
+        const z = Math.round(z1 + (z2 - z1) * t);
+        addVoxel(x, y, z, color);
+      }
+    }
+
+    function box(x1, x2, y1, y2, z1, z2, color = "iron") {
+      for (let x = x1; x <= x2; x++) {
+        for (let y = y1; y <= y2; y++) {
+          for (let z = z1; z <= z2; z++) {
+            addVoxel(x, y, z, color);
+          }
+        }
+      }
+    }
+
+    function squareRing(y, half, color = "iron") {
+      if (half <= 0) {
+        addVoxel(0, y, 0, color);
+        return;
+      }
+      for (let x = -half; x <= half; x++) {
+        addVoxel(x, y, -half, color);
+        addVoxel(x, y, half, color);
+      }
+      for (let z = -half; z <= half; z++) {
+        addVoxel(-half, y, z, color);
+        addVoxel(half, y, z, color);
+      }
+    }
+
+    function addPlatform(y, half) {
+      for (let dy = 0; dy < 2; dy++) {
+        squareRing(y + dy, half, "ironLight");
+        squareRing(y + dy, half - 1, "iron");
+        for (let x = -half + 2; x <= half - 2; x++) {
+          for (let z = -half + 2; z <= half - 2; z++) {
+            if ((x + z + dy) % 4 === 0 || (Math.abs(x) <= 1 && Math.abs(z) <= 1)) {
+              addVoxel(x, y + dy, z, "iron");
+            }
+          }
+        }
+        line(-half + 1, y + dy, 0, half - 1, y + dy, 0, "ironLight");
+        line(0, y + dy, -half + 1, 0, y + dy, half - 1, "ironLight");
+      }
+
+      line(-half, y - 1, -half, half, y - 1, half, "ironDark");
+      line(-half, y - 1, half, half, y - 1, -half, "ironDark");
+      line(-half, y - 1, 0, half, y - 1, 0, "ironDark");
+      line(0, y - 1, -half, 0, y - 1, half, "ironDark");
+    }
+
+    function addLamp(x, z) {
+      for (let y = 0; y <= 4; y++) addVoxel(x, y, z, "ironDark");
+      addVoxel(x, 5, z, "glow");
+      lampPositions.push(new THREE.Vector3(x * voxelSize, 5 * voxelSize, z * voxelSize));
+    }
+
+    const Y1 = 18;
+    const Y2 = 31;
+    const Y3 = 44;
+    const Y4 = 58;
+
+    function spanAt(y) {
+      if (y <= Y1) {
+        const t = y / Y1;
+        return 17 - 9 * Math.pow(t, 0.75);
+      }
+      if (y <= Y2) {
+        const t = (y - Y1) / (Y2 - Y1);
+        return 8 - 3 * t;
+      }
+      if (y <= Y3) {
+        const t = (y - Y2) / (Y3 - Y2);
+        return 5 - 3 * t;
+      }
+      const t = (y - Y3) / (Y4 - Y3);
+      return 2 - 2 * t;
+    }
+
+    function legThickness(y) {
+      if (y < 12) return 2;
+      if (y < 30) return 2;
+      return 1;
+    }
+
+    function buildGround() {
+      for (let x = -38; x <= 38; x++) {
+        for (let z = -38; z <= 38; z++) {
+          let color = "grass";
+
+          const crossPath = Math.abs(x) <= 2 || Math.abs(z) <= 2;
+          const outerPlaza = Math.abs(x) <= 17 && Math.abs(z) <= 17 && (Math.abs(x) >= 12 || Math.abs(z) >= 12);
+          const innerPlaza = Math.abs(x) <= 11 && Math.abs(z) <= 11 && (Math.abs(x) >= 8 || Math.abs(z) >= 8);
+
+          if (crossPath || outerPlaza || innerPlaza) color = "path";
+
+          addVoxel(x, -1, z, color);
+        }
+      }
+    }
+
+    function buildTower() {
+      for (let y = 0; y <= Y4; y++) {
+        const off = Math.round(spanAt(y));
+        const t = legThickness(y);
+
+        const corners = [
+          [-1, -1],
+          [-1,  1],
+          [ 1, -1],
+          [ 1,  1]
+        ];
+
+        for (const [sx, sz] of corners) {
+          for (let ix = 0; ix < t; ix++) {
+            for (let iz = 0; iz < t; iz++) {
+              const x = sx > 0 ? off - ix : -off + ix;
+              const z = sz > 0 ? off - iz : -off + iz;
+              addVoxel(x, y, z, "iron");
+            }
+          }
+        }
+
+        if (y % 4 === 0 && y < Y4) {
+          const inner = Math.max(1, off - 1);
+          line(-inner, y, inner, inner, y, inner, "ironDark");
+          line(-inner, y, -inner, inner, y, -inner, "ironDark");
+          line(-inner, y, -inner, -inner, y, inner, "ironDark");
+          line(inner, y, -inner, inner, y, inner, "ironDark");
+        }
+      }
+
+      for (let y = 1; y < Y1; y += 4) {
+        const y2 = Math.min(y + 4, Y1);
+        const o1 = Math.max(1, Math.round(spanAt(y)) - 1);
+        const o2 = Math.max(1, Math.round(spanAt(y2)) - 1);
+
+        line(-o1, y,  o1,  o2, y2,  o2, "ironDark");
+        line( o1, y,  o1, -o2, y2,  o2, "ironDark");
+        line(-o1, y, -o1,  o2, y2, -o2, "ironDark");
+        line( o1, y, -o1, -o2, y2, -o2, "ironDark");
+        line(-o1, y, -o1, -o2, y2,  o2, "ironDark");
+        line(-o1, y,  o1, -o2, y2, -o2, "ironDark");
+        line( o1, y, -o1,  o2, y2,  o2, "ironDark");
+        line( o1, y,  o1,  o2, y2, -o2, "ironDark");
+      }
+
+      for (let y = Y1 + 1; y < Y3; y += 3) {
+        const y2 = Math.min(y + 3, Y3);
+        const o1 = Math.max(1, Math.round(spanAt(y)) - 1);
+        const o2 = Math.max(1, Math.round(spanAt(y2)) - 1);
+
+        line(-o1, y,  o1,  o2, y2,  o2, "ironDark");
+        line( o1, y,  o1, -o2, y2,  o2, "ironDark");
+        line(-o1, y, -o1,  o2, y2, -o2, "ironDark");
+        line( o1, y, -o1, -o2, y2, -o2, "ironDark");
+        line(-o1, y, -o1, -o2, y2,  o2, "ironDark");
+        line(-o1, y,  o1, -o2, y2, -o2, "ironDark");
+        line( o1, y, -o1,  o2, y2,  o2, "ironDark");
+        line( o1, y,  o1,  o2, y2, -o2, "ironDark");
+      }
+
+      addPlatform(Y1, 10);
+      addPlatform(Y2, 6);
+      addPlatform(Y3, 3);
+
+      const archSpan = 12;
+      for (let x = -archSpan; x <= archSpan; x++) {
+        const nx = x / archSpan;
+        const y = Math.round(2 + 9 * (1 - nx * nx));
+        addVoxel(x, y, 15, "ironLight");
+        addVoxel(x, y, -15, "ironLight");
+      }
+      for (let z = -archSpan; z <= archSpan; z++) {
+        const nz = z / archSpan;
+        const y = Math.round(2 + 9 * (1 - nz * nz));
+        addVoxel(15, y, z, "ironLight");
+        addVoxel(-15, y, z, "ironLight");
+      }
+
+      for (let y = Y3 + 1; y <= 49; y++) {
+        squareRing(y, 1, "ironLight");
+      }
+
+      for (let y = 50; y <= 54; y++) {
+        addVoxel(0, y, 0, "ironLight");
+      }
+
+      for (let y = 55; y <= 64; y++) {
+        addVoxel(0, y, 0, "glow");
+      }
+      addVoxel(1, 57, 0, "glow");
+      addVoxel(-1, 57, 0, "glow");
+      addVoxel(0, 57, 1, "glow");
+      addVoxel(0, 57, -1, "glow");
+    }
+
+    buildGround();
+    buildTower();
+
+    addLamp(18, 18);
+    addLamp(-18, 18);
+    addLamp(18, -18);
+    addLamp(-18, -18);
+
+    const buckets = {
+      grass: [],
+      path: [],
+      ironDark: [],
+      iron: [],
+      ironLight: [],
+      glow: []
+    };
+
+    voxelMap.forEach((color, k) => {
+      const p = k.split(",").map(Number);
+      buckets[color].push(p);
+    });
+
+    const geometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
+
+    const materials = {
+      grass: new THREE.MeshStandardMaterial({ color: 0x4c8d3d, roughness: 1.0, metalness: 0.0 }),
+      path: new THREE.MeshStandardMaterial({ color: 0xc4aa84, roughness: 1.0, metalness: 0.0 }),
+      ironDark: new THREE.MeshStandardMaterial({ color: 0x5b3819, roughness: 0.88, metalness: 0.18 }),
+      iron: new THREE.MeshStandardMaterial({ color: 0x8a5a2c, roughness: 0.82, metalness: 0.22 }),
+      ironLight: new THREE.MeshStandardMaterial({ color: 0xb97a3e, roughness: 0.75, metalness: 0.26 }),
+      glow: new THREE.MeshStandardMaterial({
+        color: 0xffe7a2,
+        emissive: 0xffc84d,
+        emissiveIntensity: 1.35,
+        roughness: 0.45,
+        metalness: 0.0
+      })
+    };
+
+    function buildInstancedMesh(points, material) {
+      const mesh = new THREE.InstancedMesh(geometry, material, points.length);
+      const dummy = new THREE.Object3D();
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        dummy.position.set(p[0] * voxelSize, p[1] * voxelSize, p[2] * voxelSize);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.frustumCulled = false;
+      world.add(mesh);
+      return mesh;
+    }
+
+    buildInstancedMesh(buckets.grass, materials.grass);
+    buildInstancedMesh(buckets.path, materials.path);
+    buildInstancedMesh(buckets.ironDark, materials.ironDark);
+    buildInstancedMesh(buckets.iron, materials.iron);
+    buildInstancedMesh(buckets.ironLight, materials.ironLight);
+    buildInstancedMesh(buckets.glow, materials.glow);
+
+    const beacon = new THREE.PointLight(0xffcc7a, 1.8, 65, 2);
+    beacon.position.set(0, 64 * voxelSize, 0);
+    scene.add(beacon);
+
+    for (const pos of lampPositions) {
+      const lamp = new THREE.PointLight(0xffc878, 0.9, 28, 2);
+      lamp.position.copy(pos);
+      scene.add(lamp);
+    }
+
+    const stars = new THREE.BufferGeometry();
+    const starCount = 900;
+    const starPositions = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      const r = 180 + Math.random() * 90;
+      const a = Math.random() * Math.PI * 2;
+      const h = 60 + Math.random() * 120;
+      starPositions[i * 3 + 0] = Math.cos(a) * r;
+      starPositions[i * 3 + 1] = h;
+      starPositions[i * 3 + 2] = Math.sin(a) * r;
+    }
+    stars.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
+    const starField = new THREE.Points(
+      stars,
+      new THREE.PointsMaterial({ color: 0xffffff, size: 1.2, sizeAttenuation: true, transparent: true, opacity: 0.85 })
+    );
+    scene.add(starField);
+
+    function onResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    window.addEventListener("resize", onResize);
+
+    function animate(t) {
+      requestAnimationFrame(animate);
+
+      const time = t * 0.001;
+      beacon.intensity = 1.5 + Math.sin(time * 5.0) * 0.5;
+      materials.glow.emissiveIntensity = 1.15 + Math.sin(time * 6.5) * 0.2;
+      starField.rotation.y += 0.00025;
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate(0);
+  </script>
+</body>
+</html>
